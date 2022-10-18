@@ -3,10 +3,12 @@ version: "3.8"
 services:
   app:
     build:
-      context: app/
-      dockerfile: ./Dockerfile
+      context: ./
+      dockerfile: ./app/Dockerfile
     command: bash
     tty: true
+    volumes:
+      - :/usr/src/app
 
 #      args:
 #        DEBIAN_FRONTEND: noninteractive
