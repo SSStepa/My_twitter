@@ -7,8 +7,10 @@ services:
       dockerfile: ./app/Dockerfile
     command: bash
     tty: true
+    ports:
+      - 5000:5000
     volumes:
-      - app:/usr/src/app:rw
+      - ./app:/usr/src/app:rw
 
 #      args:
 #        DEBIAN_FRONTEND: noninteractive
