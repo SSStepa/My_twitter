@@ -41,14 +41,15 @@ def register():
 
 
 @bp.route('/login', methods=('GET', 'POST'))
+@bp.route('/login', methods=('GET', 'POST'))
 def login():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
         db = get_db()
         error = None
-        user = db.ececute(
-            'SELECT * FORM user WHERE username = ?', (username,)
+        user = db.execute(
+            'SELECT * FROM user WHERE username = ?', (username,)
         ).fetchone()
 
         if user is None:
@@ -58,7 +59,7 @@ def login():
 
         if error is None:
             session.clear()
-            session['ur_id'] = user['id']
+            session['user_id'] = user['id']
             return redirect(url_for('index'))
 
         flash(error)
