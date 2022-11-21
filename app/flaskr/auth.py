@@ -76,7 +76,7 @@ def load_logged_in_user():
     else:
         g.user = get_db().execute(
             'SELECT * FROM user WhERE id = ?', (user_id,)
-        ).ferchone()
+        ).fetchone()
 
 
 @bp.route('/logout')
