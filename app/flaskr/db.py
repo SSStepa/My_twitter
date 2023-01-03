@@ -1,17 +1,21 @@
-import sqlite3
+import psycopg2
+import os
 
 import click
 from flask import current_app, g
 
+dbname=os.environ['POSTGRES_DB']
+user=os.environ['POSTGRES_USER']
+password=os.environ['POSTGRES_PASSWORD']
+host=os.environ['POSTGRES_HOST']
+port=int(os.environ['POSTGRES_PORT'])
+conn = psycopg2.connect(dbname=dbname, user=user, password=password, host=host, port=port)
+
 
 def get_db():
-    if 'db' not in g:
-        g.db = sqlite3.connect(
-            current_app.config['DATABASE'],
-            detect_types=sqlite3.PARSE_DECLTYPES
-        )
-        g.db.row_factory = sqlite3.Row
 
+    if 'db' not in g:
+        g.db = conn.cursor()
     return g.db
 
 
@@ -22,11 +26,12 @@ def close_db(e=None):
         db.close()
 
 
+
 def init_db():
     db = get_db()
 
     with current_app.open_resource('schema.sql') as f:
-        db.executescript(f.read().decode('utf8'))
+        db.execute(f.read().decode('utf8'))
 
 
 @click.command('init-db')
