@@ -32,6 +32,6 @@ CREATE TABLE "post_like" (
 CREATE TABLE "tags" (
     id SERIAL PRIMARY KEY,
     post_id INTEGER NOT NULL,
-    teg TEXT,
+    tag TEXT,
     FOREIGN KEY(post_id) REFERENCES "post" (id)
 );

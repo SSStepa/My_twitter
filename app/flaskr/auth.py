@@ -4,9 +4,7 @@ from flask import (
     Blueprint, flash, g, redirect, render_template, request, session, url_for
 )
 from werkzeug.security import check_password_hash, generate_password_hash
-
-from flaskr.db import get_db,conn
-
+from flaskr.__init__ import conn
 bp = Blueprint('auth', __name__, url_prefix='/auth')
 
 
@@ -15,9 +13,8 @@ def register():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
-        db = get_db()
         error = None
-
+        cur = g.cur
         if not username:
             error = 'Username is required.'
         elif not password:
@@ -25,12 +22,11 @@ def register():
 
         if error is None:
             try:
-                db.execute(
+                cur.execute(
                     'INSERT INTO "user" (username, password) VALUES (%s, %s)',
                     (username, generate_password_hash(password))
                 )
-                conn.commit()
-            except conn.IntegrityError:
+            except g.conn.IntegrityError:
                 error = f"User {username} is already registered."
             else:
                 return redirect(url_for("auth.login"))
@@ -41,27 +37,25 @@ def register():
 
 
 @bp.route('/login', methods=('GET', 'POST'))
-@bp.route('/login', methods=('GET', 'POST'))
 def login():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
-        db = get_db()
         error = None
-        user = db.execute(
+        cur = g.cur
+        cur.execute(
             'SELECT * FROM "user" WHERE username = %s', (username,)
-        ).fetchone()
-
+        )
+        user = cur.fetchone()
         if user is None:
             error = 'Incorrect username.'
-        elif not check_password_hash(user['password'], password):
+        elif not check_password_hash(user[2], password):
             error = 'Incorrect password.'
 
         if error is None:
             session.clear()
-            session['user_id'] = user['id']
+            session['user_id'] = user[0]
             return redirect(url_for('index'))
-
         flash(error)
 
     return render_template('auth/login.html')
@@ -74,10 +68,12 @@ def load_logged_in_user():
     if user_id is None:
         g.user = None
     else:
-        g.user = get_db().execute(
+        
+        cur = conn.cursor()
+        cur.execute(
             'SELECT * FROM "user" WHERE id = %s', (user_id,)
-        ).fetchone()
-
+        )
+        g.user = cur.fetchone()
 
 @bp.route('/logout')
 def logout():

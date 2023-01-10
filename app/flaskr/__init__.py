@@ -1,6 +1,13 @@
 import os
+import psycopg2
+from flask import Flask, g
 
-from flask import Flask
+dbname=os.environ['POSTGRES_DB']
+user=os.environ['POSTGRES_USER']
+password=os.environ['POSTGRES_PASSWORD']
+host=os.environ['POSTGRES_HOST']
+port=int(os.environ['POSTGRES_PORT'])
+conn = psycopg2.connect(dbname=dbname, user=user, password=password, host=host, port=port)
 
 
 def create_app(test_config=None):
@@ -24,10 +31,6 @@ def create_app(test_config=None):
     except OSError:
         pass
     
-    #a simple page that says hello
-    @app.route('/hello')
-    def hello():
-        return 'Hello, World!'
 
     from . import db
     db.init_app(app)
@@ -38,4 +41,24 @@ def create_app(test_config=None):
     from . import blog
     app.register_blueprint(blog.bp)
     app.add_url_rule('/', endpoint='index')
+
+
+    @app.before_request
+    def before_request():
+        g.conn = psycopg2.connect(dbname=dbname, user=user, password=password, host=host, port=port)
+        g.cur = g.conn.cursor()
+    
+
+    @app.after_request
+    def after_request(response):
+        g.conn.commit()
+        return response
+    
+
+    @app.teardown_request
+    def teardown_request(exception):
+        g.conn = psycopg2.connect(dbname=dbname, user=user, password=password, host=host, port=port)
+        g.cur = g.conn.cursor()
+        g.conn.rollback()
+
     return app

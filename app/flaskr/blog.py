@@ -4,30 +4,33 @@ from flask import (
 from werkzeug.exceptions import abort
 
 from flaskr.auth import login_required
-from flaskr.db import get_db
-
 bp = Blueprint('blog', __name__)
 
 
 @bp.route('/')
 def index():
-    db = get_db()
-    posts = db.execute(
+    g.cur.execute(
         'SELECT "post".id, title, body, created, author_id, username,'
         '(SELECT COUNT(*) FROM "post_like" WHERE post_id = "post".id) AS like_count'
-        ' FROM "post" INNER JOIN "user" ON post.author_id = "user".id'
+        ' FROM "post" INNER JOIN "user" ON "post".author_id = "user".id'
         ' ORDER BY created DESC;'
-    ).fetchall()
-    likes = db.execute(
+    )
+    posts = g.cur.fetchall()
+    g.cur.execute(
         'SELECT user_id, post_id FROM "post_like" JOIN "user" ON "user".id = user_id'
-    ).fetchall()
+    )
+    likes = g.cur.fetchall()
     likes_dict = dict()
     for like in likes:
-        key = like['post_id']
+        key = like[1]
         if key not in likes_dict:
             likes_dict[key] = []
-        likes_dict[key].append(like['user_id'])
-    return render_template('blog/index.html', posts=posts, likes_dict=likes_dict)
+        likes_dict[key].append(like[0])
+    tags_dict = dict()
+    for post in posts:
+        key = post[0]
+        tags_dict[key] = tags_list(key)
+    return render_template('blog/index.html', posts=posts, likes_dict=likes_dict, tags_dict=tags_dict)
 
 
 @bp.route('/create', methods=('GET', 'POST'))
@@ -36,8 +39,10 @@ def create():
     if request.method == 'POST':
         title = request.form['title']
         body = request.form['body']
-        tegs = request.form['tegs']
-        tegs = tegs.split(" ")
+        tags = request.form['tags']
+        if tags:
+            tags = tags.split(" ")
+            tags = set(tags)
         error = None
 
         if not title:
@@ -46,37 +51,49 @@ def create():
         if error is not None:
             flash(error)
         else:
-            db = get_db()
-            post_id = db.execute(
+            g.cur.execute(
                 'INSERT INTO "post" (title, body, author_id)'
-                ' VALUES (%s, %s, %s) RETURNING *',
-                (title, body, g.user['id'],)
+                ' VALUES (%s, %s, %s) RETURNING id',
+                (title, body, g.user[0],)
             )
-#            raise Exception(post_id)
-#            for teg in tegs:
-#                db.execute (
-#                    'INSERT INTO tegs (teg, id)'
- #                   ' VALUES (%s, %s)',
-  #                  (teg, post_id)
-  #              )
-            db.commit()
+            post_id = g.cur.fetchone()[0]
+            if tags:
+                for tag in tags:
+                    g.cur.execute(
+                        'INSERT INTO "tags" (tag, post_id)'
+                        ' VALUES (%s, %s)',
+                        (tag, post_id)
+                    )
             return redirect(url_for('blog.index'))
 
     return render_template('blog/create.html')
 
 
 def get_post(id, check_author=True):
-    post = get_db().execute(
+    g.cur.execute(
         'SELECT "post".id, title, body, created, author_id, username'
         ' FROM "post" JOIN "user" ON "post".author_id = "user".id'
-        ' WHERE p.id = %s',
+        ' WHERE "post".id = %s',
         (id,)
-    ).fetchone()
-
+    )
+    post_list = g.cur.fetchall()
+    post = []
+    for i in post_list[0]:
+        post.append(i)
+    g.cur.execute(
+        'SELECT tag FROM "tags" WHERE post_id = %s',
+        (id,)
+    )
+    tags = g.cur.fetchall()
+    if tags:
+        for i in tags:
+            post.append(i[0])
+    else:
+        post.append("")
     if post is None:
         abort(404, f"Post id {id} doesn't exist.")
 
-    if check_author and post['author_id'] != g.user['id']:
+    if check_author and post[4] != g.user[0]:
         abort(403)
     
     return post
@@ -90,7 +107,10 @@ def update(id):
     if request.method == 'POST':
         title = request.form['title']
         body = request.form['body']
-        tegs = request.form['tegs']
+        tags = request.form['tags']
+        if tags:
+            tags = tags.split(" ")
+            tags = set(tags)
         error = None
 
         if not title:
@@ -99,13 +119,19 @@ def update(id):
         if error is not None:
             flash(error)
         else:
-            db = get_db()
-            db.execute(
-                'UPDATE post SET title = %s, body = %s'
+            g.cur.execute(
+                'UPDATE "post" SET title = %s, body = %s'
                 ' WHERE id = %s',
-                (title, body, tegs, id)
+                (title, body, id)
             )
-            db.commit()
+            g.cur.execute('DELETE FROM "tags" WHERE post_id = %s', (id,))
+            if tags:
+                for tag in tags:
+                    g.cur.execute(
+                        'INSERT INTO "tags" (post_id, tag)'
+                        ' VALUES (%s, %s)',
+                        (id, tag)
+                    )
             return redirect(url_for('blog.index'))
 
     return render_template('blog/update.html', post=post)
@@ -115,10 +141,9 @@ def update(id):
 @login_required
 def delete(id):
     get_post(id)
-    db = get_db()
-    db.execute('DELETE FROM "post" WHERE id = %s', (id,))
-    db.execute('DELETE FROM "post_like" WHERE id = %s', (id,))
-    db.commit()
+    g.cur.execute('DELETE FROM "tags" WHERE post_id = %s', (id,))
+    g.cur.execute('DELETE FROM "post" WHERE id = %s', (id,))
+    g.cur.execute('DELETE FROM "post_like" WHERE post_id = %s', (id,))
     return redirect(url_for('blog.index'))
 
 
@@ -127,29 +152,69 @@ def like(post_id):
 
     """ This function toggles like to post."""
 
-    db = get_db()
-    user_id = g.user['id']
-    likes = db.execute(
+    user_id = g.user[0]
+    g.cur.execute(
         'SELECT id FROM "post_like" WHERE user_id = %s and post_id = %s',
         (user_id, post_id)
-    ).fetchall()
+    )
+    likes = g.cur.fetchall()
     if likes:
-        db.execute(
+        g.cur.execute(
             'DELETE FROM  "post_like" WHERE user_id = %s and post_id = %s',
             (user_id, post_id)
         )
     else:
-        db.execute(
+        g.cur.execute(
             'INSERT INTO "post_like" (user_id, post_id)'
             ' VALUES (%s, %s)',
             (user_id, post_id)
         )
 
-
-    db.commit()
     return redirect(url_for('blog.index'))
 
 
-@bp.route('/<teg>')
-def teg_list(teg):
-    s=1
+def tags_list(post_id):
+    g.cur.execute(
+        'SELECT tag FROM "tags" WHERE post_id = %s',
+        (post_id,)
+    )
+    tags = g.cur.fetchall()
+    return [x[0] for x in tags]
+
+
+@bp.route('/tag/<tag>')
+def tag_find(tag):
+
+    """Finds post with this tag"""
+
+    g.cur.execute(
+        'SELECT post_id FROM "tags" WHERE tag = %s',
+        (tag,)
+    )
+    posts_id = g.cur.fetchall()
+    posts = []
+    for post_id in posts_id:
+        g.cur.execute(
+            'SELECT "post".id, title, body, created, author_id, username,'
+            '(SELECT COUNT(*) FROM "post_like" WHERE post_id = "post".id) AS like_count'
+            ' FROM "post" INNER JOIN "user" ON post.author_id = "user".id'
+            ' WHERE "post".id = %s',
+            (post_id,)
+        )
+        post = g.cur.fetchone()
+        g.cur.execute(
+            'SELECT user_id, post_id FROM "post_like" JOIN "user" ON "user".id = user_id'
+        )
+        likes = g.cur.fetchall()
+        likes_dict = dict()
+        for like in likes:
+            key = like[1]
+            if key not in likes_dict:
+                likes_dict[key] = []
+            likes_dict[key].append(like[0])
+        tags_dict = dict()
+        key = post[0]
+        tags_dict[key] = tags_list(key)
+        post_dict = { "post": post, "likes": likes_dict, "tags": tags_dict}
+        posts.append(post_dict)
+    return render_template('blog/finder.html', posts=posts, tag=tag)
